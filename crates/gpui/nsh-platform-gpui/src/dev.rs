@@ -30,7 +30,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
+use nsh_engine::{App, AppError, AppErrorKind, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
 
 use crate::{app::AppView, image::AssetBase, input::KeyEvent};
 
@@ -92,8 +92,8 @@ pub fn init_logging() {
 enum Msg {
     /// From the dev client.
     Event(DevEvent),
-    /// An uncaught error of the app.
-    RuntimeError(String),
+    /// An error of the app.
+    RuntimeError(AppError),
     /// The engine could not apply a hot update in place.
     HotUpdateFailed,
     /// The reload key.
@@ -206,8 +206,8 @@ pub(crate) fn start(view: &Entity<AppView>, url: String, cx: &mut GpuiApp) {
 
     let surface = this.surface();
     let errors = tx.clone();
-    surface.set_error_handler(Box::new(move |message| {
-        let _ = errors.unbounded_send(Msg::RuntimeError(message.to_owned()));
+    surface.set_error_handler(Box::new(move |error| {
+        let _ = errors.unbounded_send(Msg::RuntimeError(error.clone()));
     }));
     let failed = tx.clone();
     surface.set_hot_update_failed(move || {
@@ -340,8 +340,8 @@ fn handle(view: &AppView, msg: Msg) {
     let Some(session) = dev.as_mut() else { return };
     let load = match msg {
         Msg::Event(event) => on_event(view, session, event),
-        Msg::RuntimeError(message) => {
-            session.show_error("Uncaught error", &message, false);
+        Msg::RuntimeError(error) => {
+            session.show_error(error_title(&error), &error.to_string(), false);
             None
         }
         Msg::HotUpdateFailed => reload(session),
@@ -356,6 +356,17 @@ fn handle(view: &AppView, msg: Msg) {
     drop(dev);
     if let Some(bundle) = load {
         view.load(App::Js(bundle));
+    }
+}
+
+/// The overlay's title for an error of the app.
+fn error_title(error: &AppError) -> &'static str {
+    match error.kind {
+        AppErrorKind::Load => "The app failed to load",
+        AppErrorKind::Stopped => "The app was stopped",
+        AppErrorKind::HotUpdate => "Update failed",
+        AppErrorKind::Asset => "Cannot load a file",
+        _ => "Uncaught error",
     }
 }
 

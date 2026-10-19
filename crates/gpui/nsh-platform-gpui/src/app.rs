@@ -14,7 +14,7 @@ use gpui::{
 };
 use nsh_core::{platform::Appearance, ui::ThemeError};
 use nsh_engine::{
-    App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root, Theme,
+    App, AppError, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root, Theme,
 };
 
 use crate::{
@@ -147,7 +147,8 @@ impl Default for AppOptions {
 ///   [`AppView::set_appearance`] its light or dark mode.
 /// - What the app tells the embedding app goes through the native
 ///   components the latter registers ([`AppView::register_component`]):
-///   their events and commands. [`AppView::on_error`] hears fatal errors.
+///   their events and commands. [`AppView::on_app_error`] hears the app's
+///   errors.
 /// - The view draws only inside its bounds: the host's overlays (GPUI
 ///   Kit's dialogs, popovers, notifications) draw above it.
 /// - Open the host window with `inactive_frame_interval: None` in its
@@ -333,10 +334,20 @@ impl AppView {
         *self.surface.stats.borrow_mut() = on.then(Default::default);
     }
 
-    /// Calls `f` with the message of every fatal error of the app (an
-    /// uncaught exception at the start, a VM limit reached), which is also
-    /// logged.
+    /// Calls `f` with the text (the message and the stack) of every error
+    /// of the app, which is also logged: [`AppView::on_app_error`] with
+    /// [`AppError`]'s text, replacing the handler either set.
     pub fn on_error(&self, f: impl Fn(&str) + 'static) {
+        self.on_app_error(move |error| f(&error.to_string()));
+    }
+
+    /// Calls `f` with every error of the app, which is also logged: what
+    /// went wrong ([`AppError::kind`]; [`AppError::is_fatal`] when the app
+    /// did not start or its VM stopped, so that no JS of it runs again),
+    /// the message, the stack mapped to the app's sources, and the signed
+    /// package it came from ([`AppError::package`]: its id and build).
+    /// Replaces the handler [`AppView::on_error`] or this set.
+    pub fn on_app_error(&self, f: impl Fn(&AppError) + 'static) {
         self.surface.set_error_handler(Box::new(f));
     }
 

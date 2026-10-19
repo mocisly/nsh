@@ -121,5 +121,13 @@ in a resizable split.
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
   Space or Enter while focused (NSH's fields do not see those keys). It returns a focus handle of its own
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
-  among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
-  the app's fatal errors (also logged).
+  among the app's text fields, and a click focuses that handle too.
+- **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
+  re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
+  on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS
+  of that app runs again, where a host falls back to another build), the `message` and the `stack` apart (the stack
+  mapped to the sources when the bundle has a source map), and the signed `package` it came from (`PackageInfo`: id,
+  name, version, build, SHA-256; `Bundle::package`, set by `Bundle::from_package`). `AppView::on_error` is the same
+  handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
+  `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
+  `NshView.ErrorListener`) are unchanged.

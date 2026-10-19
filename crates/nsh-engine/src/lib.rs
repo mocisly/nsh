@@ -9,6 +9,7 @@
 //! the engine.
 
 mod access;
+mod error;
 pub mod perf;
 mod script;
 #[cfg(feature = "js")]
@@ -37,6 +38,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 
+pub use crate::error::{AppError, AppErrorKind, PackageInfo};
 use crate::script::{NetworkQueue, RequestId, Script};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -92,6 +94,9 @@ pub struct Bundle {
     /// apps); `None`: compiled when the policy hardens. Set it with
     /// [`Bundle::with_harden_bytecode`].
     pub harden_bytecode: Option<Arc<Vec<u8>>>,
+    /// The signed package the bundle came from ([`Bundle::from_package`]),
+    /// named in the app's errors ([`AppError::package`]).
+    pub package: Option<Arc<PackageInfo>>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -208,6 +213,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             harden_bytecode: None,
+            package: None,
         }
     }
 
@@ -220,6 +226,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             harden_bytecode: None,
+            package: None,
         }
     }
 
@@ -319,6 +326,13 @@ impl Bundle {
             .as_ref()
             .map(Capabilities::from_json)
             .transpose()?;
+        bundle.package = Some(Arc::new(PackageInfo {
+            id: package.app.id.clone(),
+            name: package.app.name.clone(),
+            version: package.app.version.clone(),
+            build: package.app.build,
+            sha256: package.sha256.clone(),
+        }));
         Ok(bundle)
     }
 }
@@ -393,10 +407,19 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
-    /// A fatal app error: the bundle failed to load, or an exception escaped
-    /// a JS callback. Errors are always logged; development hosts also show
-    /// them on screen.
+    /// An error of the app, as text (the message and the stack): the
+    /// bundle failed to load, an exception escaped a JS callback, the VM
+    /// was stopped. Errors are always logged; development hosts also show
+    /// them on screen. What [`MountSink::report`] calls unless it is
+    /// implemented.
     fn report_error(&self, _message: &str) {}
+
+    /// An error of the app, with its parts: what went wrong (whether the
+    /// app can go on), the message, the stack and the package it came
+    /// from. By default, [`MountSink::report_error`] with its text.
+    fn report(&self, error: &AppError) {
+        self.report_error(&error.to_string());
+    }
 
     /// JS or a component's task asked for a display frame
     /// (`requestAnimationFrame`, `ui::ambient::next_frame`): call
@@ -926,7 +949,10 @@ impl<M: TextEngine + 'static> Driver<M> {
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");
-                    sink.report_error(&format!("font failed: {err}"));
+                    sink.report(&AppError::new(
+                        AppErrorKind::Asset,
+                        &format!("font failed: {err}"),
+                    ));
                 }
             }
         }
@@ -944,7 +970,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             .and_then(|data| core.register_font(&data));
             if let Err(err) = result {
                 log::error!("font failed: {}: {err}", font.uri);
-                sink.report_error(&format!("font failed: {}: {err}", font.uri));
+                let message = format!("font failed: {}: {err}", font.uri);
+                let package = match &config.app {
+                    App::Js(bundle) => bundle.package.clone(),
+                    App::Rust(_) => None,
+                };
+                sink.report(&AppError::new(AppErrorKind::Asset, &message).with_package(package));
             }
         }
         // A task woken on any thread wakes the loop, and so does a JS call
@@ -1138,7 +1169,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             && let Some(reason) = script.fatal()
         {
             self.stopped = true;
-            script.report(&*self.sink, "stopped", &reason);
+            script.report(&*self.sink, AppErrorKind::Stopped, "stopped", &reason);
         }
     }
 }
@@ -1462,7 +1493,12 @@ impl<M: TextEngine> State<M> {
             }
             .and_then(|data| self.core.register_font(&data));
             if let Err(err) = result {
-                script.report(sink, "font failed", &format!("{uri}: {err}"));
+                script.report(
+                    sink,
+                    AppErrorKind::Asset,
+                    "font failed",
+                    &format!("{uri}: {err}"),
+                );
             }
         }
     }

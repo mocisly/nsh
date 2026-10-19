@@ -115,6 +115,10 @@ so only load it from your own app's files.
 - `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the release runner does).
 - `AppView::register_component(name, factory)` registers a native component of yours before loading
   ([Native components](./native-components.md)).
+- `AppView::on_app_error(|error| …)` hears the app's errors: `error.kind` (the app failed to load, an uncaught
+  exception, the VM stopped), `error.is_fatal()` when no JS of the app runs again, `error.message`, `error.stack`
+  and `error.package` (the id and build of the signed package it came from). `AppView::on_error` gets the same
+  errors as text.
 - `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own.
 
 ## Differences
