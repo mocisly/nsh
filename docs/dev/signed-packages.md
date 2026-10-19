@@ -18,6 +18,12 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   then the files (source, bytecode, source map, assets), then the release key's signature over everything before it.
   The source is always included; the bytecode is only used when its version is the runtime's `BYTECODE_VERSION`.
   `nsh publish` refuses to sign what a device would refuse (the certificate must cover the app and the time).
+- **Forward compatibility** ("Format evolution" in `nsh-package/src/lib.rs`): older runtimes ignore header and `app`
+  fields they do not know, and leave files of unknown kinds or with unknown fields unused (still tiled and hashed),
+  so additions are optional by default; a field older runtimes must not ignore is named in the header's `critical`
+  (they refuse the package). Capabilities: `Capabilities::from_json_lenient`, see `sandbox.md`. What was left out is
+  in `VerifiedPackage::ignored` and logged by `Bundle::from_package`. Incompatible changes bump the format version.
+  Certificates and revocation lists still refuse unknown fields.
 - **Verification** (`TrustStore::verify`): the certificate's root signature, the release key not revoked, the package
   signature, the app id and the signing time against the certificate, the minimum runtime, the file table tiling the
   data exactly, each file's hash, the package hash not revoked, and the build not older than the highest accepted for
