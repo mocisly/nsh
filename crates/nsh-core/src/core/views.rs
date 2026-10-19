@@ -91,8 +91,9 @@ pub(super) struct RegionState {
     children: Vec<Expanded>,
 }
 
-/// What a region's nodes go before in their parent.
-#[derive(Debug, Clone, Copy)]
+/// What a region's nodes (or a host's JS children) go before in their
+/// parent.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Anchor {
     /// The end.
     End,
@@ -340,8 +341,20 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// What follows the elements before `out`'s end: its first node, the
+    /// region it is (empty now, it may fill), or `fallback` past them.
+    pub(super) fn anchor_after(out: &[Expanded], fallback: Anchor) -> Anchor {
+        out.iter()
+            .find_map(|e| match e.part {
+                Part::Region(region) => Some(Anchor::Region(region)),
+                _ if e.id != 0 => Some(Anchor::Node(e.id)),
+                _ => None,
+            })
+            .unwrap_or(fallback)
+    }
+
     /// The node a region's nodes go before (`None`: the end).
-    fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
+    pub(super) fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
         let mut anchor = anchor;
         loop {
             match anchor {
@@ -494,12 +507,8 @@ impl<M: TextEngine> Core<M> {
         }
         let anchor = self.anchor_node(state.anchor);
         if let Some(at) = placeholder {
-            let after = out[at + 1..]
-                .iter()
-                .find(|e| e.id != 0)
-                .map(|e| e.id)
-                .or(anchor);
-            inst.children_at = Placement::At(parent, after);
+            inst.children_at =
+                Placement::At(parent, Self::anchor_after(&out[at + 1..], state.anchor));
         }
         // In place: from the last, each before the next, from the anchor.
         let nodes: Vec<NodeId> = out

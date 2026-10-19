@@ -100,9 +100,9 @@ struct VirtualListState {
 pub(super) enum Placement {
     /// Out of the tree (the view has no place for them).
     None,
-    /// In this node, before the view's node after its `Children` (their
-    /// anchor).
-    At(NodeId, Option<NodeId>),
+    /// In this node, before what the view puts after its `Children` (their
+    /// anchor: a node, or a region, whose nodes may come later).
+    At(NodeId, super::views::Anchor),
     /// Each in its own wrapper ([`ParentElement::children_each`]): placed
     /// by the view's region of wrappers.
     Each,
@@ -817,11 +817,14 @@ impl<M: TextEngine> Core<M> {
                 match place {
                     // Before its next JS sibling, else before what the
                     // view puts after the children.
-                    Placement::At(p, anchor) => self.apply_op(Op::Insert {
-                        parent: p,
-                        child,
-                        before: at.and(before).or(anchor),
-                    })?,
+                    Placement::At(p, anchor) => {
+                        let anchor = self.anchor_node(anchor);
+                        self.apply_op(Op::Insert {
+                            parent: p,
+                            child,
+                            before: at.and(before).or(anchor),
+                        })?
+                    }
                     // Its wrapper is the view's (a region of them).
                     Placement::Each => self.detach_id(child),
                     Placement::None => self.detach_id(child),
@@ -1884,7 +1887,10 @@ impl<M: TextEngine> Core<M> {
             return out;
         }
         if let Some(at) = placeholder {
-            inst.children_at = Placement::At(parent, out.get(at + 1).map(|e| e.id));
+            inst.children_at = Placement::At(
+                parent,
+                Self::anchor_after(&out[at + 1..], super::views::Anchor::End),
+            );
         }
         // The native children in the view's order: the JS children in the
         // placeholder's place, a region's nodes in its (moves only when the
